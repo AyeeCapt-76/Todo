@@ -6,3 +6,11 @@
 4. Ekstrak zip-nya, kirim `app-debug.apk` ke HP, lalu instal (izinkan "instal dari sumber tidak dikenal").
 
 Data tersimpan di penyimpanan lokal HP. Font Google butuh internet saat pertama dibuka; tanpa internet tampilan memakai font sistem.
+
+## Sync antar perangkat (GitHub Gist)
+
+Di menu samping ada tombol **Sync** dan **Atur**.
+
+1. Tekan **Atur**, buat token GitHub dengan izin `gist` (link ada di dialog), tempel, lalu **Simpan & Sync**.
+2. Data tersimpan sebagai file `marketing-data.json` di Gist rahasia di akun GitHub Anda.
+3. Di perangkat lain, pasang APK yang sama, masukkan token yang sama, tekan **Sync**. Data otomatis dimuat dan digabung (yang paling baru diubah yang menang; tugas yang dihapus ikut terhapus).
