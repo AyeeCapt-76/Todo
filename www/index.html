@@ -211,6 +211,7 @@ textarea{resize:vertical;min-height:84px;line-height:1.5}
 #syncDlg h2{margin:0;font:700 20px var(--f-display);letter-spacing:-.02em}
 #syncDlg p{margin:0;color:var(--ink-2);font-size:13px;line-height:1.5}
 #syncDlg ol{margin:0;padding-left:18px;color:var(--ink-2);font-size:13px;line-height:1.6}
+#syncDlg label{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--ink-2);line-height:1.4}
 #syncDlg a{color:var(--accent);word-break:break-all}
 /* Overlays */
 .scrim{display:none;position:fixed;inset:0;z-index:45;background:var(--scrim)}
@@ -295,6 +296,7 @@ textarea{resize:vertical;min-height:84px;line-height:1.5}
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file" accept="image/*" multiple hidden>
 <input type="file" id="impFile" accept="application/json,.json" hidden>
+<input type="file" id="syncFile" accept="application/json,.json" hidden>
 
 <script>
 (function(){
@@ -370,7 +372,8 @@ function normalize(t){
 }
 
 /* ---------- persistence (cloud db, or this device) ---------- */
-function lsSave(){lsSet('tugasku.v1',JSON.stringify({tasks:Array.from(S.tasks.values()),notes:Array.from(S.notes.values()),lists:S.lists}))}
+function lsSave(){lsSet('tugasku.v1',JSON.stringify({tasks:Array.from(S.tasks.values()),notes:Array.from(S.notes.values()),lists:S.lists}));if(!S.merging)noteLocalChange()}
+function quietSave(){S.merging=true;try{lsSave()}finally{S.merging=false}}
 function save(x){if(x.kind==='note')persistNote(x);else persist(x)}
 function persist(t){
   t.updated=Date.now(); S.tasks.set(t.id,t);
@@ -632,8 +635,10 @@ function counts(){
 function statusInfo(){
   if(S.mode==='boot') return {c:'warn',a:'Menghubungkan',b:'Menyiapkan penyimpanan akun.'};
   if(S.mode==='local'){
-    var sc=syncCfg();
+    var sc=syncCfg(), tm=sc.last?new Date(sc.last).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}):'';
     if(S.syncing) return {c:'warn',a:'Menyinkronkan',b:'Mohon tunggu sebentar.'};
+    if(S.syncErr) return {c:'bad',a:'Sync tertunda',b:S.syncErr+' Akan dicoba lagi otomatis.'};
+    if(sc.token&&sc.auto!==false) return {c:'',a:'Auto sync aktif',b:(tm?'Terakhir '+tm+'. ':'')+'Perubahan dikirim otomatis dan dimuat dari perangkat lain.'};
     if(sc.last) return {c:'',a:'Sync terakhir',b:new Date(sc.last).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'. Tekan Sync untuk menyimpan dan memuat perubahan.'};
     return {c:'warn',a:'Belum disinkronkan',b:'Data baru tersimpan di perangkat ini. Tekan Sync untuk menyimpannya ke GitHub Gist.'};
   }
@@ -670,6 +675,7 @@ function renderSide(){
       '<div class="stat" id="syncCard"></div>'+
       '<div class="stat"><span class="pulse-dot '+(S.audioOn?'':'warn')+'"></span><div><b>'+(S.audioOn?'Suara alarm aktif':'Suara alarm belum aktif')+'</b>Alarm berbunyi saat MARKETING terbuka di salah satu perangkat.</div></div>'+
       (S.mode==='local'?'<div class="row-bk"><button class="btn sm primary" data-act="sync"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+(S.syncing?'Menyinkronkan…':'Sync')+'</button><button class="btn sm" data-act="syncset">Atur</button></div>':'')+
+      (S.mode==='cloud'?'<div class="stat"><div><b>Sync JSON</b>Data sudah otomatis tersinkron lewat akun Claude. Tombol ini membuat file JSON yang sama dengan aplikasi APK.</div></div><div class="row-bk"><button class="btn sm primary" data-act="syncexp"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+'Sync</button><button class="btn sm" data-act="syncimp"'+(S.syncing?' disabled':'')+'>Muat JSON</button></div>':'')+
       '<div class="stat"><div><b>Cadangan data</b>Simpan ke file atau pindahkan ke akun lain.</div></div>'+
       '<div class="row-bk"><button class="btn sm" data-act="export">Ekspor</button><button class="btn sm" data-act="import">Impor</button></div>'+
       '<div class="row-sel"><select id="soundSel" aria-label="Nada alarm">'+sounds+'</select><button class="btn sm" data-act="test">'+ic('sound',15)+'Uji</button></div>'+
@@ -1068,60 +1074,136 @@ async function readGist(id){
   if(f.truncated||typeof text!=='string'){var r=await fetch(f.raw_url);if(!r.ok)throw new Error('raw '+r.status);text=await r.text()}
   try{return JSON.parse(text)}catch(e){return null}
 }
-function mergeRemote(rem){
-  var del=delMap(), rd=rem.deleted||{}, changed=0;
+async function packImages(images){
+  var out=[], list=Array.isArray(images)?images:[];
+  for(var i=0;i<list.length;i++){
+    var im=list[i];
+    if(im&&im.d){out.push({d:im.d});continue}
+    if(im&&im.id){try{out.push({d:await imgToData('/_blob/'+im.id)})}catch(e){}}
+  }
+  return out;
+}
+async function restoreImages(src){
+  var out=[], list=Array.isArray(src)?src:[], used=0, cap=S.mode==='cloud'?180000:900000;
+  for(var i=0;i<list.length;i++){
+    var im=list[i];
+    if(!im||typeof im.d!=='string'||im.d.indexOf('data:image/')!==0||im.d.length>6e6) continue;
+    try{
+      if(S.assets){var r=await S.assets.upload(dataToBlob(im.d));out.push({id:r.id})}
+      else{if(used+im.d.length>cap) continue; used+=im.d.length; out.push({d:im.d})}
+    }catch(e){}
+  }
+  return out;
+}
+async function mergeRemote(rem){
+  var del=delMap(), rd=rem.deleted||{}, changed=0, cloud=S.mode==='cloud', added=0;
   Object.keys(rd).forEach(function(k){var v=+rd[k]||0;if(!del[k]||v>del[k])del[k]=v});
   (Array.isArray(rem.lists)?rem.lists:[]).forEach(function(l){
-    if(l&&l.id&&l.name&&!S.lists.some(function(x){return x.id===String(l.id)})){S.lists.push({id:String(l.id),name:String(l.name).slice(0,30),color:Math.abs(+l.color|0)%6});changed++}
+    if(l&&l.id&&l.name&&!S.lists.some(function(x){return x.id===String(l.id)})){S.lists.push({id:String(l.id),name:String(l.name).slice(0,30),color:Math.abs(+l.color|0)%6});added++}
   });
-  var take=function(items,map,clean){
-    (Array.isArray(items)?items:[]).forEach(function(r){
-      if(!r||typeof r!=='object'||!r.id) return;
+  if(added){changed+=added;if(cloud)saveLists();else quietSave()}
+  var take=async function(items,map,clean,note){
+    var arr=Array.isArray(items)?items:[];
+    for(var i=0;i<arr.length;i++){
+      var r=arr[i]; if(!r||typeof r!=='object'||!r.id) continue;
       var c=clean(r), ru=+r.updated||0, loc=map.get(c.id);
-      if(del[c.id]&&del[c.id]>=ru) return;
-      if(loc&&(+loc.updated||0)>=ru) return;
-      c.updated=ru||Date.now();
-      c.images=(Array.isArray(r.images)?r.images:[]).filter(function(im){return im&&typeof im.d==='string'&&im.d.indexOf('data:image/')===0}).map(function(im){return {d:im.d}});
+      if(del[c.id]&&del[c.id]>=ru) continue;
+      if(loc&&(+loc.updated||0)>=ru) continue;
+      c.updated=ru||Date.now(); c.images=await restoreImages(r.images);
+      if(loc&&S.assets) loc.images.forEach(function(im){if(im.id)S.assets.delete(im.id).catch(function(){})});
       map.set(c.id,c); changed++;
-    });
+      if(cloud){dirty.add(note?'n:'+c.id:c.id); if(note)flushNote(c.id); else flush(c.id)}
+    }
   };
-  take(rem.tasks,S.tasks,cleanTask); take(rem.notes,S.notes,cleanNote);
-  [S.tasks,S.notes].forEach(function(map){
-    Array.from(map.keys()).forEach(function(id){if(del[id]&&del[id]>=(+map.get(id).updated||0)){map.delete(id);changed++}});
+  await take(rem.tasks,S.tasks,cleanTask,false); await take(rem.notes,S.notes,cleanNote,true);
+  [[S.tasks,false],[S.notes,true]].forEach(function(p){
+    var map=p[0];
+    Array.from(map.keys()).forEach(function(id){
+      var x=map.get(id);
+      if(del[id]&&del[id]>=(+x.updated||0)){
+        map.delete(id); changed++;
+        if(cloud) (p[1]?S.ncol:S.col).doc(id).delete().catch(function(){});
+        if(S.assets) x.images.forEach(function(im){if(im.id)S.assets.delete(im.id).catch(function(){})});
+      }
+    });
   });
   lsSet('tugasku.del',JSON.stringify(del));
+  if(!cloud) quietSave();
   return changed;
 }
-function buildDoc(){
-  var del=delMap(), cut=Date.now()-90*864e5;
+async function buildDoc(){
+  var del=delMap(), cut=Date.now()-90*864e5, tasks=[], notes=[], arr, i, c;
   Object.keys(del).forEach(function(k){if(del[k]<cut)delete del[k]});
   lsSet('tugasku.del',JSON.stringify(del));
-  return {app:'MARKETING',version:2,syncedAt:new Date().toISOString(),lists:S.lists,tasks:Array.from(S.tasks.values()),notes:Array.from(S.notes.values()),deleted:del};
+  arr=Array.from(S.tasks.values());
+  for(i=0;i<arr.length;i++){c=JSON.parse(JSON.stringify(arr[i]));c.images=await packImages(arr[i].images);tasks.push(c)}
+  arr=Array.from(S.notes.values());
+  for(i=0;i<arr.length;i++){c=JSON.parse(JSON.stringify(arr[i]));c.images=await packImages(arr[i].images);notes.push(c)}
+  return {app:'MARKETING',version:2,syncedAt:new Date().toISOString(),lists:S.lists,tasks:tasks,notes:notes,deleted:del};
 }
-async function syncNow(retry){
+async function syncExport(){
+  if(S.busy||S.syncing) return;
+  var dl=null; try{dl=await claude.use('downloads')}catch(e){}
+  if(!dl){toast('Unduh file tidak tersedia di tampilan ini');return}
+  S.syncing=true; toast('Menyiapkan data…');
+  try{
+    var doc=await buildDoc();
+    await dl.save({filename:SYNC_FILE,data:new Blob([JSON.stringify(doc)],{type:'application/json'})});
+    var cfg=syncCfg(); cfg.last=Date.now(); syncSet(cfg);
+    toast('JSON tersimpan: '+doc.tasks.length+' tugas, '+doc.notes.length+' catatan');
+  }catch(e){toast(e&&e.code==='declined'?'Penyimpanan dibatalkan':'Gagal menyimpan JSON')}
+  S.syncing=false;
+}
+async function syncImport(file){
+  if(S.busy||S.syncing) return;
+  var doc; try{doc=JSON.parse(await file.text())}catch(e){toast('File bukan JSON yang valid');return}
+  if(!doc||doc.app!=='MARKETING'||!Array.isArray(doc.tasks)){toast('File ini bukan data MARKETING');return}
+  S.syncing=true; toast('Menggabungkan data…');
+  var n=0; try{n=await mergeRemote(doc)}catch(e){S.syncing=false;toast('Penggabungan berhenti di tengah jalan. Coba lagi.');render();return}
+  S.syncing=false; render(); toast(n?'Data digabung: '+n+' perubahan':'Data sudah yang terbaru');
+}
+var autoTimer=0;
+function autoOn(){var c=syncCfg();return S.mode==='local'&&!!c.token&&c.auto!==false}
+function noteLocalChange(){
+  S.rev=(S.rev||0)+1; S.localDirty=true;
+  if(!autoOn()||S.syncing) return;
+  clearTimeout(autoTimer); autoTimer=setTimeout(function(){syncNow({quiet:true})},4000);
+}
+function autoPoll(){if(autoOn()&&!document.hidden&&navigator.onLine!==false&&!S.syncing&&!S.busy)syncNow({quiet:true})}
+async function syncNow(opt){
+  opt=opt||{}; var quiet=!!opt.quiet;
   if(S.syncing||S.busy||S.mode!=='local') return;
   var cfg=syncCfg();
-  if(!cfg.token){openSync();return}
-  S.syncing=true; renderSide(); toast('Menyinkronkan…');
-  var msg='';
+  if(!cfg.token){if(!quiet)openSync();return}
+  S.syncing=true; S.syncErr='';
+  if(quiet) renderStatus(); else {renderSide();toast('Menyinkronkan…')}
+  var msg='', changed=0, pushed=false, count='';
   try{
-    var id=await findGist(cfg), changed=0;
-    if(id){var rem=await readGist(id);if(rem&&rem.app==='MARKETING')changed=mergeRemote(rem)}
-    lsSave();
-    var doc=buildDoc(), body={files:{}};
-    body.files[SYNC_FILE]={content:JSON.stringify(doc)};
-    if(id) await gh('/gists/'+id,{method:'PATCH',body:JSON.stringify(body)});
-    else{body.description='MARKETING sync data';body['public']=false;var g=await gh('/gists',{method:'POST',body:JSON.stringify(body)});id=g.id}
-    cfg.gistId=id; cfg.last=Date.now(); syncSet(cfg);
-    msg='Sync selesai: '+doc.tasks.length+' tugas, '+doc.notes.length+' catatan'+(changed?'. '+changed+' perubahan dimuat dari penyimpanan':'');
+    var id=await findGist(cfg);
+    if(id){var rem=await readGist(id);if(rem&&rem.app==='MARKETING')changed=await mergeRemote(rem)}
+    if(!id||S.localDirty||!cfg.last){
+      var rev=S.rev, doc=await buildDoc(), body={files:{}};
+      body.files[SYNC_FILE]={content:JSON.stringify(doc)};
+      if(id) await gh('/gists/'+id,{method:'PATCH',body:JSON.stringify(body)});
+      else{body.description='MARKETING sync data';body['public']=false;var g=await gh('/gists',{method:'POST',body:JSON.stringify(body)});id=g.id}
+      if(S.rev===rev) S.localDirty=false;
+      pushed=true; count=doc.tasks.length+' tugas, '+doc.notes.length+' catatan';
+    }
+    cfg=syncCfg(); cfg.gistId=id; cfg.last=Date.now(); syncSet(cfg);
+    if(quiet) msg=changed?'Data diperbarui dari perangkat lain':'';
+    else msg='Sync selesai'+(count?': '+count:'')+(changed?'. '+changed+' perubahan dimuat dari penyimpanan':'');
   }catch(e){
-    if(e&&e.status===404&&cfg.gistId&&!retry){cfg.gistId='';syncSet(cfg);S.syncing=false;return syncNow(true)}
+    if(e&&e.status===404&&cfg.gistId&&!opt.retry){cfg=syncCfg();cfg.gistId='';syncSet(cfg);S.syncing=false;return syncNow({quiet:quiet,retry:true})}
     if(e&&e.status===401) msg='Token ditolak GitHub. Buat token baru lewat tombol Atur.';
     else if(e&&e.status===403) msg='Token belum punya izin Gist, atau batas GitHub tercapai.';
     else if(e&&e.status===422) msg='Data terlalu besar untuk Gist. Kurangi gambar lampiran.';
     else msg='Sync gagal. Periksa koneksi internet.';
+    S.syncErr=msg; if(quiet) msg='';
   }
-  S.syncing=false; render(); toast(msg);
+  S.syncing=false;
+  if(changed||!quiet) render(); else renderStatus();
+  if(changed&&quiet) scheduleRender();
+  if(msg) toast(msg);
 }
 function openSync(){
   closeSync();
@@ -1130,6 +1212,7 @@ function openSync(){
     '<p>Data disimpan sebagai file JSON di GitHub Gist pribadi (rahasia) milik akun Anda. Perangkat lain memuatnya dengan token yang sama.</p>'+
     '<ol><li>Buka <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=MARKETING%20sync" target="_blank" rel="noopener">github.com/settings/tokens/new</a></li>'+
     '<li>Centang izin <b>gist</b>, buat token, lalu salin.</li><li>Tempel token di bawah (sama di semua perangkat).</li></ol>'+
+    '<label><input type="checkbox" id="syncAuto"'+(cfg.auto!==false?' checked':'')+'><span>Sync otomatis: setelah setiap perubahan, saat aplikasi dibuka, dan tiap 45 detik.</span></label>'+
     '<input type="password" id="syncTok" placeholder="ghp_… atau github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(cfg.token||'')+'">'+
     '<div class="row-bk"><button class="btn" data-act="syncclose">Batal</button><button class="btn primary" data-act="syncsave">Simpan &amp; Sync</button></div>'+
     (cfg.token?'<button class="btn sm danger" data-act="syncreset">Hapus token dari perangkat ini</button>':'')+'</div>';
@@ -1140,6 +1223,7 @@ function saveSyncToken(){
   var v=($('#syncTok').value||'').trim();
   if(!/^[A-Za-z0-9_]{20,}$/.test(v)){toast('Token tidak valid');return}
   var cfg=syncCfg(); if(cfg.token!==v) cfg={token:v};
+  cfg.auto=$('#syncAuto').checked;
   syncSet(cfg); closeSync(); syncNow();
 }
 
@@ -1228,6 +1312,8 @@ document.addEventListener('click',function(e){
     case 'search': app.dataset.search=app.dataset.search==='open'?'closed':'open';if(app.dataset.search==='open')$('#q').focus(); break;
     case 'seed': seed(); break;
     case 'sync': syncNow(); break;
+    case 'syncexp': syncExport(); break;
+    case 'syncimp': $('#syncFile').click(); break;
     case 'syncset': openSync(); break;
     case 'syncclose': closeSync(); break;
     case 'syncsave': saveSyncToken(); break;
@@ -1289,6 +1375,7 @@ document.addEventListener('change',function(e){
   var t=cur(); if(!t) return;
   setField(t,f,el.value); persist(t); render(); renderDetail(true);
 });
+$('#syncFile').addEventListener('change',function(e){var f=e.target.files[0];e.target.value='';if(f)syncImport(f)});
 $('#impFile').addEventListener('change',function(e){var f=e.target.files[0];e.target.value='';if(f)importData(f)});
 $('#file').addEventListener('change',function(e){var fs=Array.from(e.target.files);e.target.value='';addImages(fs)});
 $('#q').addEventListener('input',function(e){S.q=e.target.value;renderSide();renderTitle();renderList()});
@@ -1375,8 +1462,13 @@ async function init(){
   },function(e){S.err=e;renderStatus()});
   scheduleRender();
 }
+S.localDirty=true; S.rev=0;
 init();
 setInterval(tick,5000);
+setInterval(autoPoll,45000);
+setTimeout(autoPoll,2500);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(autoPoll,300)});
+window.addEventListener('online',function(){setTimeout(autoPoll,500)});
 })();
 </script>
 
