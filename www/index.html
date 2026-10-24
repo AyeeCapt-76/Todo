@@ -206,6 +206,12 @@ textarea{resize:vertical;min-height:84px;line-height:1.5}
 .cal-add{margin-left:auto}
 .row-bk{display:flex;gap:6px}
 .row-bk .btn{flex:1}
+#syncDlg{position:fixed;inset:0;z-index:110;display:grid;place-items:center;background:var(--scrim);padding:16px}
+#syncDlg .dlg{width:min(420px,100%);max-height:100%;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px}
+#syncDlg h2{margin:0;font:700 20px var(--f-display);letter-spacing:-.02em}
+#syncDlg p{margin:0;color:var(--ink-2);font-size:13px;line-height:1.5}
+#syncDlg ol{margin:0;padding-left:18px;color:var(--ink-2);font-size:13px;line-height:1.6}
+#syncDlg a{color:var(--accent);word-break:break-all}
 /* Overlays */
 .scrim{display:none;position:fixed;inset:0;z-index:45;background:var(--scrim)}
 .app[data-drawer="open"] .scrim.sd{display:block;z-index:55}
@@ -388,7 +394,7 @@ function flush(id){
   }).catch(function(e){S.err=e||{};dirty.delete(id)}).then(renderStatus);
 }
 function removeTask(t){
-  S.tasks.delete(t.id); dirty.delete(t.id); clearTimeout(timers[t.id]); delete timers[t.id];
+  markDel(t.id); S.tasks.delete(t.id); dirty.delete(t.id); clearTimeout(timers[t.id]); delete timers[t.id];
   if(S.mode==='cloud'){
     chain[t.id]=(chain[t.id]||Promise.resolve()).then(function(){return S.col.doc(t.id).delete()}).catch(function(e){S.err=e||{}}).then(renderStatus);
   } else lsSave();
@@ -416,7 +422,7 @@ function flushNote(id){
   }).catch(function(e){S.err=e||{};dirty.delete(k)}).then(renderStatus);
 }
 function removeNote(n){
-  var k='n:'+n.id; S.notes.delete(n.id); dirty.delete(k); clearTimeout(timers[k]); delete timers[k];
+  var k='n:'+n.id; markDel(n.id); S.notes.delete(n.id); dirty.delete(k); clearTimeout(timers[k]); delete timers[k];
   if(S.mode==='cloud'){
     chain[k]=(chain[k]||Promise.resolve()).then(function(){return S.ncol.doc(n.id).delete()}).catch(function(e){S.err=e||{}}).then(renderStatus);
   } else lsSave();
@@ -625,7 +631,12 @@ function counts(){
 /* ---------- render: sidebar ---------- */
 function statusInfo(){
   if(S.mode==='boot') return {c:'warn',a:'Menghubungkan',b:'Menyiapkan penyimpanan akun.'};
-  if(S.mode==='local') return {c:'warn',a:'Hanya di perangkat ini',b:'Masuk ke akun Claude pada halaman ini agar tugas tersinkron ke semua perangkat.'};
+  if(S.mode==='local'){
+    var sc=syncCfg();
+    if(S.syncing) return {c:'warn',a:'Menyinkronkan',b:'Mohon tunggu sebentar.'};
+    if(sc.last) return {c:'',a:'Sync terakhir',b:new Date(sc.last).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'. Tekan Sync untuk menyimpan dan memuat perubahan.'};
+    return {c:'warn',a:'Belum disinkronkan',b:'Data baru tersimpan di perangkat ini. Tekan Sync untuk menyimpannya ke GitHub Gist.'};
+  }
   if(S.err) return {c:'bad',a:'Gagal menyimpan',b:'Periksa koneksi. Perubahan berikutnya akan dicoba lagi.'};
   if(dirty.size) return {c:'warn',a:'Menyimpan',b:'Perubahan sedang dikirim.'};
   return {c:'',a:'Tersinkron',b:'Buka halaman ini dengan akun yang sama di HP atau PC.'};
@@ -658,6 +669,7 @@ function renderSide(){
     '<div class="side-foot">'+
       '<div class="stat" id="syncCard"></div>'+
       '<div class="stat"><span class="pulse-dot '+(S.audioOn?'':'warn')+'"></span><div><b>'+(S.audioOn?'Suara alarm aktif':'Suara alarm belum aktif')+'</b>Alarm berbunyi saat MARKETING terbuka di salah satu perangkat.</div></div>'+
+      (S.mode==='local'?'<div class="row-bk"><button class="btn sm primary" data-act="sync"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+(S.syncing?'Menyinkronkan…':'Sync')+'</button><button class="btn sm" data-act="syncset">Atur</button></div>':'')+
       '<div class="stat"><div><b>Cadangan data</b>Simpan ke file atau pindahkan ke akun lain.</div></div>'+
       '<div class="row-bk"><button class="btn sm" data-act="export">Ekspor</button><button class="btn sm" data-act="import">Impor</button></div>'+
       '<div class="row-sel"><select id="soundSel" aria-label="Nada alarm">'+sounds+'</select><button class="btn sm" data-act="test">'+ic('sound',15)+'Uji</button></div>'+
@@ -1026,6 +1038,111 @@ async function importData(file){
   toast('Impor selesai: '+doc.tasks.length+' tugas, '+notes.length+' catatan'+(lost?'. '+lost+' gambar tidak bisa dipulihkan':'')+(skipped?'. '+skipped+' item dilewati':''));
 }
 
+/* ---------- sync (GitHub Gist) ---------- */
+var SYNC_FILE='marketing-data.json';
+function syncCfg(){try{return JSON.parse(lsGet('tugasku.sync')||'{}')||{}}catch(e){return {}}}
+function syncSet(o){lsSet('tugasku.sync',JSON.stringify(o))}
+function delMap(){try{return JSON.parse(lsGet('tugasku.del')||'{}')||{}}catch(e){return {}}}
+function markDel(id){var m=delMap();m[id]=Date.now();lsSet('tugasku.del',JSON.stringify(m))}
+async function gh(path,opt){
+  var cfg=syncCfg(), o=opt||{}, h={'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json'};
+  if(o.body) h['Content-Type']='application/json';
+  var r=await fetch('https://api.github.com'+path,{method:o.method||'GET',headers:h,body:o.body});
+  if(!r.ok){var er=new Error('GitHub '+r.status);er.status=r.status;throw er}
+  return r.json();
+}
+async function findGist(cfg){
+  if(cfg.gistId) return cfg.gistId;
+  for(var page=1;page<=5;page++){
+    var list=await gh('/gists?per_page=100&page='+page);
+    if(!list.length) break;
+    var g=list.find(function(x){return x.files&&x.files[SYNC_FILE]});
+    if(g) return g.id;
+    if(list.length<100) break;
+  }
+  return null;
+}
+async function readGist(id){
+  var g=await gh('/gists/'+id), f=g.files&&g.files[SYNC_FILE]; if(!f) return null;
+  var text=f.content;
+  if(f.truncated||typeof text!=='string'){var r=await fetch(f.raw_url);if(!r.ok)throw new Error('raw '+r.status);text=await r.text()}
+  try{return JSON.parse(text)}catch(e){return null}
+}
+function mergeRemote(rem){
+  var del=delMap(), rd=rem.deleted||{}, changed=0;
+  Object.keys(rd).forEach(function(k){var v=+rd[k]||0;if(!del[k]||v>del[k])del[k]=v});
+  (Array.isArray(rem.lists)?rem.lists:[]).forEach(function(l){
+    if(l&&l.id&&l.name&&!S.lists.some(function(x){return x.id===String(l.id)})){S.lists.push({id:String(l.id),name:String(l.name).slice(0,30),color:Math.abs(+l.color|0)%6});changed++}
+  });
+  var take=function(items,map,clean){
+    (Array.isArray(items)?items:[]).forEach(function(r){
+      if(!r||typeof r!=='object'||!r.id) return;
+      var c=clean(r), ru=+r.updated||0, loc=map.get(c.id);
+      if(del[c.id]&&del[c.id]>=ru) return;
+      if(loc&&(+loc.updated||0)>=ru) return;
+      c.updated=ru||Date.now();
+      c.images=(Array.isArray(r.images)?r.images:[]).filter(function(im){return im&&typeof im.d==='string'&&im.d.indexOf('data:image/')===0}).map(function(im){return {d:im.d}});
+      map.set(c.id,c); changed++;
+    });
+  };
+  take(rem.tasks,S.tasks,cleanTask); take(rem.notes,S.notes,cleanNote);
+  [S.tasks,S.notes].forEach(function(map){
+    Array.from(map.keys()).forEach(function(id){if(del[id]&&del[id]>=(+map.get(id).updated||0)){map.delete(id);changed++}});
+  });
+  lsSet('tugasku.del',JSON.stringify(del));
+  return changed;
+}
+function buildDoc(){
+  var del=delMap(), cut=Date.now()-90*864e5;
+  Object.keys(del).forEach(function(k){if(del[k]<cut)delete del[k]});
+  lsSet('tugasku.del',JSON.stringify(del));
+  return {app:'MARKETING',version:2,syncedAt:new Date().toISOString(),lists:S.lists,tasks:Array.from(S.tasks.values()),notes:Array.from(S.notes.values()),deleted:del};
+}
+async function syncNow(retry){
+  if(S.syncing||S.busy||S.mode!=='local') return;
+  var cfg=syncCfg();
+  if(!cfg.token){openSync();return}
+  S.syncing=true; renderSide(); toast('Menyinkronkan…');
+  var msg='';
+  try{
+    var id=await findGist(cfg), changed=0;
+    if(id){var rem=await readGist(id);if(rem&&rem.app==='MARKETING')changed=mergeRemote(rem)}
+    lsSave();
+    var doc=buildDoc(), body={files:{}};
+    body.files[SYNC_FILE]={content:JSON.stringify(doc)};
+    if(id) await gh('/gists/'+id,{method:'PATCH',body:JSON.stringify(body)});
+    else{body.description='MARKETING sync data';body['public']=false;var g=await gh('/gists',{method:'POST',body:JSON.stringify(body)});id=g.id}
+    cfg.gistId=id; cfg.last=Date.now(); syncSet(cfg);
+    msg='Sync selesai: '+doc.tasks.length+' tugas, '+doc.notes.length+' catatan'+(changed?'. '+changed+' perubahan dimuat dari penyimpanan':'');
+  }catch(e){
+    if(e&&e.status===404&&cfg.gistId&&!retry){cfg.gistId='';syncSet(cfg);S.syncing=false;return syncNow(true)}
+    if(e&&e.status===401) msg='Token ditolak GitHub. Buat token baru lewat tombol Atur.';
+    else if(e&&e.status===403) msg='Token belum punya izin Gist, atau batas GitHub tercapai.';
+    else if(e&&e.status===422) msg='Data terlalu besar untuk Gist. Kurangi gambar lampiran.';
+    else msg='Sync gagal. Periksa koneksi internet.';
+  }
+  S.syncing=false; render(); toast(msg);
+}
+function openSync(){
+  closeSync();
+  var cfg=syncCfg(), m=document.createElement('div'); m.id='syncDlg';
+  m.innerHTML='<div class="dlg" role="dialog" aria-label="Pengaturan sync"><h2>Sinkronisasi</h2>'+
+    '<p>Data disimpan sebagai file JSON di GitHub Gist pribadi (rahasia) milik akun Anda. Perangkat lain memuatnya dengan token yang sama.</p>'+
+    '<ol><li>Buka <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=MARKETING%20sync" target="_blank" rel="noopener">github.com/settings/tokens/new</a></li>'+
+    '<li>Centang izin <b>gist</b>, buat token, lalu salin.</li><li>Tempel token di bawah (sama di semua perangkat).</li></ol>'+
+    '<input type="password" id="syncTok" placeholder="ghp_… atau github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(cfg.token||'')+'">'+
+    '<div class="row-bk"><button class="btn" data-act="syncclose">Batal</button><button class="btn primary" data-act="syncsave">Simpan &amp; Sync</button></div>'+
+    (cfg.token?'<button class="btn sm danger" data-act="syncreset">Hapus token dari perangkat ini</button>':'')+'</div>';
+  document.body.appendChild(m);
+}
+function closeSync(){var d=$('#syncDlg');if(d)d.remove()}
+function saveSyncToken(){
+  var v=($('#syncTok').value||'').trim();
+  if(!/^[A-Za-z0-9_]{20,}$/.test(v)){toast('Token tidak valid');return}
+  var cfg=syncCfg(); if(cfg.token!==v) cfg={token:v};
+  syncSet(cfg); closeSync(); syncNow();
+}
+
 /* ---------- alarm engine ---------- */
 var ac=null, ringTimer=0, flashTimer=0, firingKey='';
 function unlockAudio(){
@@ -1110,6 +1227,11 @@ document.addEventListener('click',function(e){
     case 'scrim': app.dataset.drawer='closed'; break;
     case 'search': app.dataset.search=app.dataset.search==='open'?'closed':'open';if(app.dataset.search==='open')$('#q').focus(); break;
     case 'seed': seed(); break;
+    case 'sync': syncNow(); break;
+    case 'syncset': openSync(); break;
+    case 'syncclose': closeSync(); break;
+    case 'syncsave': saveSyncToken(); break;
+    case 'syncreset': syncSet({}); closeSync(); renderSide(); toast('Pengaturan sync dihapus dari perangkat ini'); break;
     case 'export': exportData(); break;
     case 'import': $('#impFile').click(); break;
     case 'kind': if(t&&t.kind!=='note'){var dv=el.dataset.v==='1';if(dv!==!!t.daily){t.daily=dv;t.snooze=0;if(dv){t.due='';t.repeat='none';t.done=false;t.doneAt=0}else{t.due=today()}persist(t);render();renderDetail(true)}} break;
