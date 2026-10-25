@@ -167,6 +167,95 @@ jobs:
             desktop/dist/latest.yml
             desktop/dist/*.blockmap
 
+  pages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pillow
+      - name: Build web app
+        run: |
+          mkdir -p site
+          sed "s/__APP_VER__/$APP_VERSION/" www/index.html > site/app.html
+          python3 - <<'EOF'
+          from PIL import Image, ImageDraw
+          def icon(size, name, pad=0.0):
+              S = size * 4
+              im = Image.new("RGB", (S, S), (43, 74, 203))
+              d = ImageDraw.Draw(im)
+              k = S * (1 - 2 * pad)
+              o = S * pad
+              pts = [(o + k * 0.27, o + k * 0.52), (o + k * 0.43, o + k * 0.68), (o + k * 0.74, o + k * 0.34)]
+              d.line(pts, fill=(255, 255, 255), width=int(k * 0.1), joint="curve")
+              for x, y in (pts[0], pts[2]):
+                  r = k * 0.05
+                  d.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255))
+              im.resize((size, size), Image.LANCZOS).save("site/" + name)
+          icon(512, "icon-512.png")
+          icon(192, "icon-192.png")
+          icon(180, "icon-180.png")
+          EOF
+          cat > site/manifest.webmanifest <<'EOF'
+          {
+            "name": "MARKETING",
+            "short_name": "MARKETING",
+            "start_url": ".",
+            "scope": ".",
+            "display": "standalone",
+            "background_color": "#0A0F19",
+            "theme_color": "#2B4ACB",
+            "icons": [
+              { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+              { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+            ]
+          }
+          EOF
+          cat > site/sw.js <<'EOF'
+          const C = 'marketing-v1';
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+          self.addEventListener('fetch', (e) => {
+            const r = e.request;
+            if (r.method !== 'GET' || new URL(r.url).origin !== location.origin) return;
+            e.respondWith(
+              fetch(r).then((res) => {
+                const cp = res.clone();
+                caches.open(C).then((c) => c.put(r, cp));
+                return res;
+              }).catch(() => caches.match(r).then((m) => m || caches.match('index.html')))
+            );
+          });
+          EOF
+          python3 - <<'EOF'
+          html = open("site/app.html", encoding="utf-8").read()
+          tags = ('<meta name="theme-color" content="#2B4ACB">'
+                  '<meta name="apple-mobile-web-app-capable" content="yes">'
+                  '<meta name="mobile-web-app-capable" content="yes">'
+                  '<meta name="apple-mobile-web-app-title" content="MARKETING">'
+                  '<link rel="manifest" href="manifest.webmanifest">'
+                  '<link rel="apple-touch-icon" href="icon-180.png">')
+          sw = "<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(function(){})}</script>"
+          assert html.count("</head>") == 1 and html.rstrip().endswith("</body></html>")
+          html = html.replace("</head>", tags + "</head>", 1)
+          i = html.rindex("</body>")
+          html = html[:i] + sw + html[i:]
+          open("site/index.html", "w", encoding="utf-8").write(html)
+          EOF
+          rm site/app.html
+          ls -la site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
   release:
     needs: [apk, exe]
     runs-on: ubuntu-latest
