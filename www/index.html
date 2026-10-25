@@ -674,6 +674,7 @@ function renderSide(){
     '<div class="side-foot">'+
       '<div class="stat" id="syncCard"></div>'+
       '<div class="stat"><span class="pulse-dot '+(S.audioOn?'':'warn')+'"></span><div><b>'+(S.audioOn?'Suara alarm aktif':'Suara alarm belum aktif')+'</b>Alarm berbunyi saat MARKETING terbuka di salah satu perangkat.</div></div>'+
+      (S.update?'<div class="stat"><div><b>Pembaruan '+esc(S.update.ver)+' tersedia</b>Unduh APK baru lalu instal di atas aplikasi ini. Data tetap aman.</div></div><div class="row-bk"><button class="btn sm primary" data-act="appupdate">Unduh pembaruan</button></div>':'')+
       (S.mode==='local'?'<div class="row-bk"><button class="btn sm primary" data-act="sync"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+(S.syncing?'Menyinkronkan…':'Sync')+'</button><button class="btn sm" data-act="syncset">Atur</button></div>':'')+
       (S.mode==='cloud'?'<div class="stat"><div><b>Sync JSON</b>Data sudah otomatis tersinkron lewat akun Claude. Tombol ini membuat file JSON yang sama dengan aplikasi APK.</div></div><div class="row-bk"><button class="btn sm primary" data-act="syncexp"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+'Sync</button><button class="btn sm" data-act="syncimp"'+(S.syncing?' disabled':'')+'>Muat JSON</button></div>':'')+
       '<div class="stat"><div><b>Cadangan data</b>Simpan ke file atau pindahkan ke akun lain.</div></div>'+
@@ -1227,6 +1228,21 @@ function saveSyncToken(){
   syncSet(cfg); closeSync(); syncNow();
 }
 
+/* ---------- app update (GitHub Releases, APK) ---------- */
+var APP_REPO='__APP_REPO__', APP_VER='__APP_VER__';
+function verNum(v){var p=String(v).replace(/^v/,'').split('.');return +p[p.length-1]||0}
+async function checkAppUpdate(){
+  if(!window.Capacitor||APP_REPO.indexOf('__')===0||S.update) return;
+  try{
+    var r=await fetch('https://api.github.com/repos/'+APP_REPO+'/releases/latest'); if(!r.ok) return;
+    var j=await r.json(), tag=j.tag_name||'';
+    if(verNum(tag)>verNum(APP_VER)){
+      var a=(j.assets||[]).find(function(x){return /\.apk$/i.test(x.name)});
+      if(a){S.update={ver:String(tag).replace(/^v/,''),url:a.browser_download_url};renderSide()}
+    }
+  }catch(e){}
+}
+
 /* ---------- alarm engine ---------- */
 var ac=null, ringTimer=0, flashTimer=0, firingKey='';
 function unlockAudio(){
@@ -1311,6 +1327,7 @@ document.addEventListener('click',function(e){
     case 'scrim': app.dataset.drawer='closed'; break;
     case 'search': app.dataset.search=app.dataset.search==='open'?'closed':'open';if(app.dataset.search==='open')$('#q').focus(); break;
     case 'seed': seed(); break;
+    case 'appupdate': if(S.update) window.open(S.update.url,'_blank'); break;
     case 'sync': syncNow(); break;
     case 'syncexp': syncExport(); break;
     case 'syncimp': $('#syncFile').click(); break;
@@ -1467,7 +1484,9 @@ init();
 setInterval(tick,5000);
 setInterval(autoPoll,45000);
 setTimeout(autoPoll,2500);
-document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(autoPoll,300)});
+setTimeout(checkAppUpdate,4000);
+setInterval(checkAppUpdate,6*3600*1000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden){setTimeout(autoPoll,300);setTimeout(checkAppUpdate,1500)}});
 window.addEventListener('online',function(){setTimeout(autoPoll,500)});
 })();
 </script>
