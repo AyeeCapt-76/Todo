@@ -958,7 +958,7 @@ function renderSide(){
       (S.update?'<div class="stat"><div><b>Pembaruan '+esc(S.update.ver)+' tersedia</b>Unduh APK baru lalu instal di atas aplikasi ini. Data tetap aman.</div></div><div class="row-bk"><button class="btn sm primary" data-act="appupdate">Unduh pembaruan</button></div>':'')+
       (S.mode==='local'?'<div class="row-bk"><button class="btn sm primary" data-act="sync"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+(S.syncing?'Menyinkronkan…':'Sync')+'</button><button class="btn sm" data-act="syncset">Atur</button></div>':'')+
       (S.mode==='cloud'?'<div class="stat"><div><b>Sync JSON</b>Data sudah otomatis tersinkron lewat akun Claude. Tombol ini membuat file JSON yang sama dengan aplikasi APK.</div></div><div class="row-bk"><button class="btn sm primary" data-act="syncexp"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+'Sync</button><button class="btn sm" data-act="syncimp"'+(S.syncing?' disabled':'')+'>Muat JSON</button></div>':'')+
-      '<div class="stat"><div><b>Cadangan data</b>Simpan ke file atau pindahkan ke akun lain.</div></div>'+
+      '<div class="stat"><div><b>Cadangan data</b>Ekspor menyimpan ke file. Impor menggabungkan, tidak menimpa data yang lebih baru.</div></div>'+
       '<div class="row-bk"><button class="btn sm" data-act="export">Ekspor</button><button class="btn sm" data-act="import">Impor</button></div>'+
       '<div class="row-sel"><select id="soundSel" aria-label="Nada alarm">'+sounds+'</select><button class="btn sm" data-act="test">'+ic('sound',15)+'Uji</button></div>'+
     '</div>';
@@ -1314,46 +1314,18 @@ async function exportData(){
   S.busy=false;
 }
 async function importData(file){
-  if(S.busy) return;
+  if(S.busy||S.syncing) return;
   var doc;
   try{doc=JSON.parse(await file.text())}catch(e){toast('File bukan cadangan yang valid');return}
   if(!doc||doc.app!=='MARKETING'||!Array.isArray(doc.tasks)||(doc.notes&&!Array.isArray(doc.notes))){toast('File ini bukan cadangan MARKETING');return}
-  S.busy=true;
-  var notes=doc.notes||[], total=doc.tasks.length+notes.length, n=0, lost=0, skipped=0, added=0;
-  (Array.isArray(doc.lists)?doc.lists:[]).forEach(function(l){
-    if(l&&l.id&&l.name&&!S.lists.some(function(x){return x.id===String(l.id)})){S.lists.push({id:String(l.id),name:String(l.name).slice(0,30),color:Math.abs(+l.color|0)%6});added++}
-  });
-  if(added) saveLists();
-  var restore=async function(images,target,cap){
-    var list=Array.isArray(images)?images:[];
-    for(var i=0;i<list.length;i++){
-      var im=list[i];
-      if(!im||typeof im.d!=='string'||im.d.indexOf('data:image/')!==0||im.d.length>6e6){lost++;continue}
-      try{
-        if(S.assets){var r=await S.assets.upload(dataToBlob(im.d));target.images.push({id:r.id})}
-        else{
-          var used=target.images.reduce(function(a,x){return a+(x.d?x.d.length:0)},0);
-          if(used+im.d.length>cap){lost++;continue}
-          target.images.push({d:im.d});
-        }
-      }catch(e){lost++}
-    }
-  };
-  var cap=S.mode==='cloud'?180000:900000, i, c;
-  try{
-    for(i=0;i<doc.tasks.length;i++){
-      if(!doc.tasks[i]||typeof doc.tasks[i]!=='object'){skipped++;continue}
-      c=cleanTask(doc.tasks[i]); await restore(doc.tasks[i].images,c,cap); persist(c);
-      n++; if(n%3===0) toast('Mengimpor '+n+' dari '+total+'…');
-    }
-    for(i=0;i<notes.length;i++){
-      if(!notes[i]||typeof notes[i]!=='object'){skipped++;continue}
-      c=cleanNote(notes[i]); await restore(notes[i].images,c,cap); persistNote(c);
-      n++; if(n%3===0) toast('Mengimpor '+n+' dari '+total+'…');
-    }
-  }catch(e){toast('Impor berhenti di tengah jalan. Coba lagi dengan file yang sama.');S.busy=false;render();return}
-  S.busy=false; render();
-  toast('Impor selesai: '+doc.tasks.length+' tugas, '+notes.length+' catatan'+(lost?'. '+lost+' gambar tidak bisa dipulihkan':'')+(skipped?'. '+skipped+' item dilewati':''));
+  S.busy=true; toast('Menggabungkan data…');
+  var n=0, st;
+  try{n=await mergeRemote(doc,{additive:true}); st=mergeRemote.last}
+  catch(e){S.busy=false;render();toast('Penggabungan berhenti di tengah jalan. Coba lagi dengan file yang sama.');return}
+  S.busy=false;
+  if(n&&S.mode==='local') noteLocalChange();
+  render();
+  toast(n?('Digabung: '+st.add+' baru, '+st.upd+' diperbarui, '+st.keep+' dibiarkan karena data di sini lebih baru'):('Tidak ada yang berubah: semua data di file sudah ada dan tidak lebih baru ('+st.keep+' item)'));
 }
 
 /* ---------- sync (GitHub Gist) ---------- */
@@ -1413,8 +1385,9 @@ async function restoreImages(src){
   }
   return out;
 }
-async function mergeRemote(rem){
-  var del=delMap(), rd=rem.deleted||{}, changed=0, cloud=S.mode==='cloud', added=0;
+async function mergeRemote(rem,opt){
+  var additive=!!(opt&&opt.additive), st={add:0,upd:0,keep:0};
+  var del=delMap(), rd=additive?{}:(rem.deleted||{}), changed=0, cloud=S.mode==='cloud', added=0;
   Object.keys(rd).forEach(function(k){var v=+rd[k]||0;if(!del[k]||v>del[k])del[k]=v});
   (Array.isArray(rem.lists)?rem.lists:[]).forEach(function(l){
     if(l&&l.id&&l.name&&!S.lists.some(function(x){return x.id===String(l.id)})){S.lists.push({id:String(l.id),name:String(l.name).slice(0,30),color:Math.abs(+l.color|0)%6});added++}
@@ -1425,8 +1398,10 @@ async function mergeRemote(rem){
     for(var i=0;i<arr.length;i++){
       var r=arr[i]; if(!r||typeof r!=='object'||!r.id) continue;
       var c=clean(r), ru=+r.updated||0, loc=map.get(c.id);
-      if(del[c.id]&&del[c.id]>=ru) continue;
-      if(loc&&(+loc.updated||0)>=ru) continue;
+      if(!additive&&del[c.id]&&del[c.id]>=ru) continue;
+      if(loc&&(+loc.updated||0)>=ru){st.keep++;continue}
+      if(additive&&del[c.id]) delete del[c.id];
+      if(loc) st.upd++; else st.add++;
       c.updated=ru||Date.now(); c.images=await restoreImages(r.images);
       if(loc&&S.assets) loc.images.forEach(function(im){if(im.id)S.assets.delete(im.id).catch(function(){})});
       map.set(c.id,c); changed++;
@@ -1434,7 +1409,7 @@ async function mergeRemote(rem){
     }
   };
   await take(rem.tasks,S.tasks,cleanTask,false); await take(rem.notes,S.notes,cleanNote,true);
-  [[S.tasks,false],[S.notes,true]].forEach(function(p){
+  if(!additive) [[S.tasks,false],[S.notes,true]].forEach(function(p){
     var map=p[0];
     Array.from(map.keys()).forEach(function(id){
       var x=map.get(id);
@@ -1447,6 +1422,7 @@ async function mergeRemote(rem){
   });
   lsSet('tugasku.del',JSON.stringify(del));
   if(!cloud) quietSave();
+  mergeRemote.last=st;
   return changed;
 }
 async function buildDoc(){
@@ -1472,14 +1448,7 @@ async function syncExport(){
   }catch(e){toast(e&&e.code==='declined'?'Penyimpanan dibatalkan':'Gagal menyimpan JSON')}
   S.syncing=false;
 }
-async function syncImport(file){
-  if(S.busy||S.syncing) return;
-  var doc; try{doc=JSON.parse(await file.text())}catch(e){toast('File bukan JSON yang valid');return}
-  if(!doc||doc.app!=='MARKETING'||!Array.isArray(doc.tasks)){toast('File ini bukan data MARKETING');return}
-  S.syncing=true; toast('Menggabungkan data…');
-  var n=0; try{n=await mergeRemote(doc)}catch(e){S.syncing=false;toast('Penggabungan berhenti di tengah jalan. Coba lagi.');render();return}
-  S.syncing=false; render(); toast(n?'Data digabung: '+n+' perubahan':'Data sudah yang terbaru');
-}
+function syncImport(file){return importData(file)}
 var autoTimer=0;
 function autoOn(){var c=syncCfg();return S.mode==='local'&&!!c.token&&c.auto!==false}
 function noteLocalChange(){
