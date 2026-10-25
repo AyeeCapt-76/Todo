@@ -1365,9 +1365,12 @@ function markDel(id){var m=delMap();m[id]=Date.now();lsSet('tugasku.del',JSON.st
 async function gh(path,opt){
   var cfg=syncCfg(), o=opt||{}, h={'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json'};
   if(o.body) h['Content-Type']='application/json';
-  var r=await fetch('https://api.github.com'+path,{method:o.method||'GET',headers:h,body:o.body});
+  if(o.etag) h['If-None-Match']=o.etag;
+  var r=await fetch('https://api.github.com'+path,{method:o.method||'GET',headers:h,body:o.body,cache:'no-store'});
+  if(r.status===304) return {__notModified:true};
   if(!r.ok){var er=new Error('GitHub '+r.status);er.status=r.status;throw er}
-  return r.json();
+  var j=await r.json(); try{j.__etag=r.headers.get('etag')||''}catch(e){}
+  return j;
 }
 async function findGist(cfg){
   if(cfg.gistId) return cfg.gistId;
@@ -1380,11 +1383,14 @@ async function findGist(cfg){
   }
   return null;
 }
-async function readGist(id){
-  var g=await gh('/gists/'+id), f=g.files&&g.files[SYNC_FILE]; if(!f) return null;
+async function readGist(id,etag){
+  var g=await gh('/gists/'+id,{etag:etag});
+  if(g.__notModified) return {same:true};
+  var f=g.files&&g.files[SYNC_FILE]; if(!f) return {doc:null,etag:g.__etag||''};
   var text=f.content;
-  if(f.truncated||typeof text!=='string'){var r=await fetch(f.raw_url);if(!r.ok)throw new Error('raw '+r.status);text=await r.text()}
-  try{return JSON.parse(text)}catch(e){return null}
+  if(f.truncated||typeof text!=='string'){var r=await fetch(f.raw_url+(f.raw_url.indexOf('?')>-1?'&':'?')+'t='+Date.now(),{cache:'no-store'});if(!r.ok)throw new Error('raw '+r.status);text=await r.text()}
+  var doc=null; try{doc=JSON.parse(text)}catch(e){}
+  return {doc:doc,etag:g.__etag||''};
 }
 async function packImages(images){
   var out=[], list=Array.isArray(images)?images:[];
@@ -1479,7 +1485,7 @@ function autoOn(){var c=syncCfg();return S.mode==='local'&&!!c.token&&c.auto!==f
 function noteLocalChange(){
   S.rev=(S.rev||0)+1; S.localDirty=true;
   if(!autoOn()||S.syncing) return;
-  clearTimeout(autoTimer); autoTimer=setTimeout(function(){syncNow({quiet:true})},4000);
+  clearTimeout(autoTimer); autoTimer=setTimeout(function(){syncNow({quiet:true})},1500);
 }
 function autoPoll(){if(autoOn()&&!document.hidden&&navigator.onLine!==false&&!S.syncing&&!S.busy)syncNow({quiet:true})}
 async function syncNow(opt){
@@ -1491,8 +1497,14 @@ async function syncNow(opt){
   if(quiet) renderStatus(); else {renderSide();toast('Menyinkronkan…')}
   var msg='', changed=0, pushed=false, count='';
   try{
-    var id=await findGist(cfg);
-    if(id){var rem=await readGist(id);if(rem&&rem.app==='MARKETING')changed=await mergeRemote(rem)}
+    var id=await findGist(cfg), newEtag='';
+    if(id){
+      var res=await readGist(id,(cfg.gistId===id&&cfg.etag)?cfg.etag:null);
+      if(!res.same){
+        newEtag=res.etag||'';
+        if(res.doc&&res.doc.app==='MARKETING') changed=await mergeRemote(res.doc);
+      } else newEtag=cfg.etag;
+    }
     if(!id||S.localDirty||!cfg.last){
       var rev=S.rev, doc=await buildDoc(), body={files:{}};
       body.files[SYNC_FILE]={content:JSON.stringify(doc)};
@@ -1501,7 +1513,7 @@ async function syncNow(opt){
       if(S.rev===rev) S.localDirty=false;
       pushed=true; count=doc.tasks.length+' tugas, '+doc.notes.length+' catatan';
     }
-    cfg=syncCfg(); cfg.gistId=id; cfg.last=Date.now(); syncSet(cfg);
+    cfg=syncCfg(); cfg.gistId=id; cfg.last=Date.now(); cfg.etag=pushed?'':newEtag; syncSet(cfg);
     if(quiet) msg=changed?'Data diperbarui dari perangkat lain':'';
     else msg='Sync selesai'+(count?': '+count:'')+(changed?'. '+changed+' perubahan dimuat dari penyimpanan':'');
   }catch(e){
@@ -1524,7 +1536,7 @@ function openSync(){
     '<p>Data disimpan sebagai file JSON di GitHub Gist pribadi (rahasia) milik akun Anda. Perangkat lain memuatnya dengan token yang sama.</p>'+
     '<ol><li>Buka <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=MARKETING%20sync" target="_blank" rel="noopener">github.com/settings/tokens/new</a></li>'+
     '<li>Centang izin <b>gist</b>, buat token, lalu salin.</li><li>Tempel token di bawah (sama di semua perangkat).</li></ol>'+
-    '<label><input type="checkbox" id="syncAuto"'+(cfg.auto!==false?' checked':'')+'><span>Sync otomatis: setelah setiap perubahan, saat aplikasi dibuka, dan tiap 45 detik.</span></label>'+
+    '<label><input type="checkbox" id="syncAuto"'+(cfg.auto!==false?' checked':'')+'><span>Sync otomatis: perubahan terkirim dalam 2 detik dan perangkat lain dicek tiap 12 detik.</span></label>'+
     '<input type="password" id="syncTok" placeholder="ghp_… atau github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(cfg.token||'')+'">'+
     '<div class="row-bk"><button class="btn" data-act="syncclose">Batal</button><button class="btn primary" data-act="syncsave">Simpan &amp; Sync</button></div>'+
     (cfg.token?'<button class="btn sm danger" data-act="syncreset">Hapus token dari perangkat ini</button>':'')+'</div>';
@@ -1807,7 +1819,7 @@ async function init(){
 S.localDirty=true; S.rev=0;
 init();
 setInterval(tick,5000);
-setInterval(autoPoll,45000);
+setInterval(autoPoll,12000);
 setTimeout(autoPoll,2500);
 setTimeout(checkAppUpdate,4000);
 setInterval(checkAppUpdate,6*3600*1000);
