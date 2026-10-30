@@ -446,6 +446,16 @@ body{font-size:15px}
 .qq,.qchip,.seg button{font-size:13.5px}
 .row{border-color:var(--line)}
 .done .rtitle{color:var(--ink-3)}
+
+/* Hero ikut scroll bersama daftar; statistik tidak terpotong */
+.scrollwrap{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.scrollwrap #content{flex:none!important;overflow:visible!important;min-height:0}
+.dash-top{flex-wrap:wrap}
+.dash-top .g{flex:1 1 150px}
+.dash-top h2{font-size:20px;overflow-wrap:anywhere}
+.stats{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;overflow:visible!important}
+.stat-c{min-width:0!important}
+@media (min-width:700px){.stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
 </style>
 
 <div class="app" id="app" data-detail="closed">
@@ -466,8 +476,10 @@ body{font-size:15px}
       <div class="qa-hint" id="qaHint"></div>
       <div class="qa-quick" id="qaQuick"></div>
     </div>
-    <div class="dash" id="dash"></div>
-    <div id="content"></div>
+    <div class="scrollwrap" id="scrollwrap">
+      <div class="dash" id="dash"></div>
+      <div id="content"></div>
+    </div>
   </main>
   <section class="detail" id="detail" aria-label="Detail tugas"></section>
   <div class="scrim sd" data-act="scrim"></div>
@@ -1359,7 +1371,7 @@ function toggleDone(t){
     if(t.done) toast('Tugas selesai');
   }
 }
-function setView(v){S.view=v;S.q='';$('#q').value='';app.dataset.drawer='closed';app.dataset.search='closed';app.dataset.add='closed';render();var ct=$('#content');if(ct)ct.scrollTop=0}
+function setView(v){S.view=v;S.q='';$('#q').value='';app.dataset.drawer='closed';app.dataset.search='closed';app.dataset.add='closed';render();var ct=$('#scrollwrap');if(ct)ct.scrollTop=0}
 function openTask(id){pushDetail();S.sel=id;S.confirmDel=null;renderList();renderDetail(true);var d=$('#detail');if(d)d.scrollTop=0}
 var histOn=false;
 function pushDetail(){if(!histOn){try{history.pushState({md:1},'');histOn=true}catch(e){}}}
