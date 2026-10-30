@@ -402,11 +402,12 @@ body{background:var(--bg-grad) fixed}
 .rprog b{font:500 11.5px var(--f-mono);color:var(--ink-3)}
 .btn.primary,.qa .btn{border-radius:14px}
 .qa-field{border-radius:16px;background:var(--surface)}
-.hero{padding:6px 20px 0}
-.hero-top{display:flex;align-items:center;gap:12px}
-.hero-top .g{flex:1;min-width:0}
-.hero-top small{color:var(--ink-3);font-size:13px}
-.hero-top h2{margin:2px 0 0;font:700 22px/1.15 var(--f-display);letter-spacing:-.02em}
+.dash{padding:6px 20px 0}
+.dash-top{display:flex;align-items:center;gap:12px}
+.dash-top .g{flex:1;min-width:0}
+.dash-top small{color:var(--ink-3);font-size:13px}
+.dash,.dash-top,.stats{color:var(--ink)}
+.dash-top h2{margin:2px 0 0;font:700 22px/1.15 var(--f-display);letter-spacing:-.02em}
 .dchip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:12px;background:var(--surface);border:1px solid var(--glass-b);font-size:12.5px;color:var(--ink-2);box-shadow:var(--sh);white-space:nowrap}
 .bot{flex:none}
 .stats{display:flex;gap:10px;overflow-x:auto;padding:12px 2px 6px;scrollbar-width:none}
@@ -428,6 +429,23 @@ body{background:var(--bg-grad) fixed}
   .app[data-drawer="open"] .side{transform:none}
   .brand{padding:10px 20px 6px}
 }
+
+/* ===== Keterbacaan: kontras teks lebih tinggi, ukuran lebih besar ===== */
+:root{--ink:#0B1220;--ink-2:#2F3A50;--ink-3:#566279;--surface:rgba(255,255,255,.97);--surface-2:#F0F2FA;--line:rgba(70,80,150,.22);--accent:#5F3FD6;--accent-soft:#E8E2FB;--bad:#B3261E;--bad-soft:#FBE4E1;--warn:#9A4D05;--good:#0B6B4C}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#F3F5FB;--ink-2:#CBD3E4;--ink-3:#A0ABC3;--surface:rgba(24,28,52,.97);--surface-2:#10152B;--line:rgba(160,170,235,.22);--accent:#BBAEFF;--accent-soft:#2F2863;--bad:#FF9E95;--warn:#F5BE72;--good:#5ED7AC}}
+:root[data-theme="dark"]{--ink:#F3F5FB;--ink-2:#CBD3E4;--ink-3:#A0ABC3;--surface:rgba(24,28,52,.97);--surface-2:#10152B;--line:rgba(160,170,235,.22);--accent:#BBAEFF;--accent-soft:#2F2863;--bad:#FF9E95;--warn:#F5BE72;--good:#5ED7AC}
+body{font-size:15px}
+::placeholder{color:var(--ink-3);opacity:1}
+.rtitle{font-size:16px;font-weight:600}
+.rmeta{font-size:13px}
+.chip.mono{font-size:12.5px}
+.sec-h,.nav-h{font-size:12px}
+.tab{font-size:12px!important}
+.nav-i{font-size:15px}
+.stat-c small,.stat-c em,.dash-top small{font-size:13px}
+.qq,.qchip,.seg button{font-size:13.5px}
+.row{border-color:var(--line)}
+.done .rtitle{color:var(--ink-3)}
 </style>
 
 <div class="app" id="app" data-detail="closed">
@@ -448,7 +466,7 @@ body{background:var(--bg-grad) fixed}
       <div class="qa-hint" id="qaHint"></div>
       <div class="qa-quick" id="qaQuick"></div>
     </div>
-    <div class="hero" id="hero"></div>
+    <div class="dash" id="dash"></div>
     <div id="content"></div>
   </main>
   <section class="detail" id="detail" aria-label="Detail tugas"></section>
@@ -461,7 +479,7 @@ body{background:var(--bg-grad) fixed}
 <div id="alarm" role="alertdialog" aria-modal="true" aria-labelledby="alTitle"></div>
 <div id="lb"></div>
 <div id="voice" role="dialog" aria-modal="true" aria-label="Rekam tugas dengan suara">
-  <div class="v-hi">Halo!</div><h2>Ceritakan apa yang perlu kamu kerjakan…</h2>
+  <div class="v-hi">Halo, Ko Dhani!</div><h2>Ceritakan apa yang perlu kamu kerjakan…</h2>
   <div class="v-tx empty" id="vTx">Contoh: “Rapat tim besok jam 9 lalu kirim laporan iklan hari ini”</div>
   <div class="v-wave" id="vWave" aria-hidden="true"></div>
   <div class="v-bar">
@@ -1298,7 +1316,7 @@ function renderDetail(force){
 function renderQa(){var m={notes:'Catatan baru, mis. Ide promo November',daily:'Tugas harian baru, mis. Minum vitamin 07:00',team:'Tugas untuk tim, mis. Reels promo @Budi besok !!'};$('#qa').placeholder=m[S.view]||'Tambah tugas, mis. Rapat besok 14:30 !!'}
 function botSVG(w){return '<svg class="bot" width="'+w+'" height="'+Math.round(w*1.08)+'" viewBox="0 0 100 108" fill="none" aria-hidden="true"><path d="M30 14v-4M70 14v-4" stroke="#8C95B5" stroke-width="2.5" stroke-linecap="round"/><circle cx="30" cy="8" r="3.2" fill="#2B3350"/><circle cx="70" cy="8" r="3.2" fill="#2B3350"/><rect x="14" y="14" width="72" height="50" rx="22" fill="#fff" stroke="#D5DAEC" stroke-width="2"/><rect x="22" y="23" width="56" height="32" rx="15" fill="#18203A"/><circle cx="38" cy="38" r="6" fill="none" stroke="#35C8FF" stroke-width="3"/><circle cx="62" cy="38" r="6" fill="none" stroke="#35C8FF" stroke-width="3"/><path d="M43 47q7 6 14 0" stroke="#35C8FF" stroke-width="3" stroke-linecap="round"/><rect x="26" y="66" width="48" height="34" rx="17" fill="#fff" stroke="#D5DAEC" stroke-width="2"/><circle cx="50" cy="82" r="8" fill="#18203A"/><text x="50" y="85.5" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="sans-serif">AI</text><path d="M26 76q-10 4-9 14M74 76q10 4 9 14" stroke="#D5DAEC" stroke-width="5" stroke-linecap="round"/></svg>'}
 function renderHero(){
-  var el=$('#hero'); if(!el) return;
+  var el=$('#dash'); if(!el) return;
   if(['today','focus','all'].indexOf(S.view)<0||S.q.trim()){el.innerHTML='';el.style.display='none';return}
   el.style.display='';
   var T=today(),sod=startOfToday(),left=0,over=0,dn=0;
@@ -1307,7 +1325,7 @@ function renderHero(){
   var g=h<11?'Selamat pagi':h<15?'Selamat siang':h<18?'Selamat sore':'Selamat malam';
   var dt=new Date().toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short'});
   var k=over?'Ada '+over+' tugas terlambat':left?'Ayo selesaikan '+left+' tugas hari ini':'Hari ini beres, kerja bagus!';
-  el.innerHTML='<div class="hero-top">'+botSVG(46)+'<div class="g"><small>'+g+' 👋</small><h2>'+esc(k)+'</h2></div><span class="dchip">'+ic('cal',14)+esc(dt)+'</span></div>'+
+  el.innerHTML='<div class="dash-top">'+botSVG(46)+'<div class="g"><small>'+g+' Ko Dhani 👋</small><h2>'+esc(k)+'</h2></div><span class="dchip">'+ic('cal',14)+esc(dt)+'</span></div>'+
    '<div class="stats"><div class="stat-c acc"><small>Hari ini</small><b>'+left+'</b><em>tugas tersisa</em></div>'+
    '<div class="stat-c'+(over?' bad':'')+'"><small>Terlambat</small><b>'+over+'</b><em>perlu perhatian</em></div>'+
    '<div class="stat-c ok"><small>Selesai</small><b>'+dn+'</b><em>hari ini</em></div>'+
