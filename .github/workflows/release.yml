@@ -103,12 +103,23 @@ jobs:
           cat > desktop/preload.js <<'EOF'
           const { contextBridge, ipcRenderer } = require('electron');
 
+          let handler = null;
+          const buffer = [];
+          function dispatch(url) {
+            handler(url);
+            ipcRenderer.send('auth-handled');
+          }
+          // Terima alamat balasan login (marketing://auth...) dari proses utama
+          ipcRenderer.on('auth-url', (_e, url) => {
+            if (handler) dispatch(url);
+            else buffer.push(url);
+          });
+
           contextBridge.exposeInMainWorld('desktop', {
             isDesktop: true,
-            // Dipanggil index.html untuk menerima hasil login (marketing://auth...)
             onAuthUrl: (cb) => {
-              ipcRenderer.on('auth-url', (_e, url) => cb(url));
-              ipcRenderer.send('auth-ready');
+              handler = cb;
+              buffer.splice(0).forEach(dispatch);
             }
           });
           EOF
@@ -123,23 +134,22 @@ jobs:
           } else {
             app.setAsDefaultProtocolClient(PROTO);
           }
-          if (!app.requestSingleInstanceLock()) app.quit();
+          const gotLock = app.requestSingleInstanceLock();
+          if (!gotLock) app.quit();
           let win;
-          let rendererReady = false;
           let pendingAuthUrl = null;
           const AUTH_RE = /^marketing:\/\/auth([/?#]|$)/;
           function findLink(argv) {
             return (argv || []).find((a) => typeof a === 'string' && AUTH_RE.test(a));
           }
+          // Kirim alamat login ke halaman; disimpan dulu sampai halaman mengonfirmasi sudah memprosesnya
           function deliver(url) {
             if (!url || !AUTH_RE.test(url)) return;
-            if (win && rendererReady) win.webContents.send('auth-url', url);
-            else pendingAuthUrl = url;
+            pendingAuthUrl = url;
+            if (win && !win.isDestroyed()) win.webContents.send('auth-url', url);
           }
-          ipcMain.on('auth-ready', (e) => {
-            if (!win || e.sender !== win.webContents) return;
-            rendererReady = true;
-            if (pendingAuthUrl) { win.webContents.send('auth-url', pendingAuthUrl); pendingAuthUrl = null; }
+          ipcMain.on('auth-handled', (e) => {
+            if (win && e.sender === win.webContents) pendingAuthUrl = null;
           });
           function create() {
             win = new BrowserWindow({
@@ -153,7 +163,9 @@ jobs:
               }
             });
             win.setMenuBarVisibility(false);
-            win.webContents.on('did-start-loading', () => { rendererReady = false; });
+            win.webContents.on('did-finish-load', () => {
+              if (pendingAuthUrl) win.webContents.send('auth-url', pendingAuthUrl);
+            });
             win.loadFile(path.join(__dirname, 'www', 'index.html'));
             win.webContents.setWindowOpenHandler(({ url }) => {
               if (/^https?:/.test(url)) shell.openExternal(url);
@@ -187,7 +199,7 @@ jobs:
             deliver(findLink(argv));
           });
           app.on('open-url', (e, url) => { e.preventDefault(); deliver(url); }); // macOS
-          app.whenReady().then(() => { pendingAuthUrl = findLink(process.argv); create(); setupUpdates(); });
+          if (gotLock) app.whenReady().then(() => { pendingAuthUrl = findLink(process.argv) || null; create(); setupUpdates(); });
           app.on('window-all-closed', () => app.quit());
           EOF
       - name: Install and build
