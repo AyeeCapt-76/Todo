@@ -2492,7 +2492,7 @@ function closeAuth(){var o=$('#auth');if(o)o.remove()}
 function authMsg(t,bad){var m=$('#authMsg');if(m){m.textContent=t;m.className=bad?'bad':''}}
 function sbAuth(){
   return new Promise(function(resolve){
-    sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+    sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:'pkce'}});
     var done=false;
     function go(ses){
       if(done||!ses) return; done=true; S.user=ses.user; closeAuth();
@@ -2508,7 +2508,8 @@ function sbAuth(){
         var er=q.get('error_description')||h.get('error_description');
         if(er){authMsg('Login gagal: '+er,true);return}
         var cd=q.get('code'), at=h.get('access_token'), rt=h.get('refresh_token');
-        authMsg('Memproses login…');
+        authMsg('Tautan login diterima, memproses…');
+        if(!cd&&!(at&&rt)){authMsg('Tautan login diterima tetapi tidak berisi kode (panjang '+String(u).length+'). Coba masuk lagi.',true);return}
         var p=cd?sb.auth.exchangeCodeForSession(cd):(at&&rt?sb.auth.setSession({access_token:at,refresh_token:rt}):null);
         if(p) p.then(function(r){if(r&&r.error)authMsg('Login gagal: '+r.error.message,true)});
       }catch(e){authMsg('Tautan login tidak valid.',true)}
