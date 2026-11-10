@@ -83,8 +83,9 @@ jobs:
             "build": {
               "appId": "com.wahyuredjo.marketing",
               "productName": "MARKETING",
-              "files": ["main.js", "www/**/*"],
+              "files": ["main.js", "preload.js", "www/**/*"],
               "directories": { "output": "dist" },
+              "protocols": [{ "name": "MARKETING", "schemes": ["marketing"] }],
               "publish": [{ "provider": "github", "owner": "__OWNER__", "repo": "__REPO__" }],
               "win": { "target": ["nsis", "portable"] },
               "nsis": {
@@ -99,12 +100,47 @@ jobs:
           }
           EOF
           sed -i "s/__VER__/$APP_VERSION/; s#__OWNER__#${GITHUB_REPOSITORY%%/*}#; s#__REPO__#${GITHUB_REPOSITORY#*/}#" desktop/package.json
+          cat > desktop/preload.js <<'EOF'
+          const { contextBridge, ipcRenderer } = require('electron');
+
+          contextBridge.exposeInMainWorld('desktop', {
+            isDesktop: true,
+            // Dipanggil index.html untuk menerima hasil login (marketing://auth...)
+            onAuthUrl: (cb) => {
+              ipcRenderer.on('auth-url', (_e, url) => cb(url));
+              ipcRenderer.send('auth-ready');
+            }
+          });
+          EOF
           cat > desktop/main.js <<'EOF'
-          const { app, BrowserWindow, shell, dialog } = require('electron');
+          const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
           const { autoUpdater } = require('electron-updater');
           const path = require('path');
+          const PROTO = 'marketing';
+          // Daftarkan marketing:// supaya Windows membuka aplikasi ini setelah login di browser
+          if (process.defaultApp) {
+            if (process.argv.length >= 2) app.setAsDefaultProtocolClient(PROTO, process.execPath, [path.resolve(process.argv[1])]);
+          } else {
+            app.setAsDefaultProtocolClient(PROTO);
+          }
           if (!app.requestSingleInstanceLock()) app.quit();
           let win;
+          let rendererReady = false;
+          let pendingAuthUrl = null;
+          const AUTH_RE = /^marketing:\/\/auth([/?#]|$)/;
+          function findLink(argv) {
+            return (argv || []).find((a) => typeof a === 'string' && AUTH_RE.test(a));
+          }
+          function deliver(url) {
+            if (!url || !AUTH_RE.test(url)) return;
+            if (win && rendererReady) win.webContents.send('auth-url', url);
+            else pendingAuthUrl = url;
+          }
+          ipcMain.on('auth-ready', (e) => {
+            if (!win || e.sender !== win.webContents) return;
+            rendererReady = true;
+            if (pendingAuthUrl) { win.webContents.send('auth-url', pendingAuthUrl); pendingAuthUrl = null; }
+          });
           function create() {
             win = new BrowserWindow({
               width: 1280, height: 820, minWidth: 420, minHeight: 560,
@@ -112,10 +148,12 @@ jobs:
               webPreferences: {
                 autoplayPolicy: 'no-user-gesture-required',
                 backgroundThrottling: false,
+                preload: path.join(__dirname, 'preload.js'),
                 contextIsolation: true, nodeIntegration: false, spellcheck: false
               }
             });
             win.setMenuBarVisibility(false);
+            win.webContents.on('did-start-loading', () => { rendererReady = false; });
             win.loadFile(path.join(__dirname, 'www', 'index.html'));
             win.webContents.setWindowOpenHandler(({ url }) => {
               if (/^https?:/.test(url)) shell.openExternal(url);
@@ -144,10 +182,12 @@ jobs:
             check();
             setInterval(check, 6 * 60 * 60 * 1000);
           }
-          app.on('second-instance', () => {
+          app.on('second-instance', (_e, argv) => {
             if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+            deliver(findLink(argv));
           });
-          app.whenReady().then(() => { create(); setupUpdates(); });
+          app.on('open-url', (e, url) => { e.preventDefault(); deliver(url); }); // macOS
+          app.whenReady().then(() => { pendingAuthUrl = findLink(process.argv); create(); setupUpdates(); });
           app.on('window-all-closed', () => app.quit());
           EOF
       - name: Install and build
