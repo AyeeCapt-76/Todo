@@ -2018,7 +2018,7 @@ document.addEventListener('click',function(e){
     case 'gift': if(giftOpen()){lsSet('tugasku.gift',today());lsSet('tugasku.bonus',String((+lsGet('tugasku.bonus')||0)+25));sbSaveProfile();confetti();floatXp(25);toast('Hadiah harian: +25 XP 🎁');render()}else toast('Hadiah hari ini sudah diambil. Kembali besok!'); break;
     case 'bell': setView('focus'); (function(){var gOv=overdueN();toast(gOv?gOv+' tugas terlambat':'Tidak ada tugas terlambat')})(); break;
     case 'pro': if(S.user) app.dataset.drawer='open'; else openSync(); break;
-    case 'authgoogle': sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:REDIR}}).then(function(r){if(r.error)authMsg('Login Google belum aktif atau gagal: '+r.error.message,true)}); break;
+    case 'authgoogle': if(DESK) authMsg('Selesaikan login di browser, lalu pilih "Open" / "Buka" untuk kembali ke aplikasi.'); sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:REDIR}}).then(function(r){if(r.error)authMsg('Login Google belum aktif atau gagal: '+r.error.message,true)}); break;
     case 'authmail': (function(){var gE=($('#authEmail').value||'').trim();if(!/^\S+@\S+\.\S+$/.test(gE)){authMsg('Masukkan email yang valid.',true);return}authMsg('Mengirim…');
       sb.auth.signInWithOtp({email:gE,options:{emailRedirectTo:REDIR}}).then(function(r){r.error?authMsg('Gagal mengirim: '+r.error.message,true):authMsg('Tautan masuk dikirim ke '+gE+'. Buka email lalu ketuk tautannya.')})})(); break;
     case 'authguest': if(S.authGuest) S.authGuest(); break;
