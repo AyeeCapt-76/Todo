@@ -1290,7 +1290,7 @@ function statusInfo(){
     if(sc.last) return {c:'',a:'Sync terakhir',b:new Date(sc.last).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'. Tekan Sync untuk menyimpan dan memuat perubahan.'};
     return {c:'warn',a:'Belum disinkronkan',b:'Data baru tersimpan di perangkat ini. Tekan Sync untuk menyimpannya ke GitHub Gist.'};
   }
-  if(S.err) return {c:'bad',a:'Gagal menyimpan',b:'Periksa koneksi. Perubahan berikutnya akan dicoba lagi.'};
+  if(S.err) return {c:'bad',a:'Gagal menyimpan',b:'Periksa koneksi. Perubahan berikutnya akan dicoba lagi.'+((S.err.message||S.err.code)?' ['+(S.err.code?S.err.code+': ':'')+String(S.err.message||'').slice(0,160)+']':'')};
   if(dirty.size) return {c:'warn',a:'Menyimpan',b:'Perubahan sedang dikirim.'};
   return {c:'',a:'Tersinkron',b:'Buka halaman ini dengan akun yang sama di HP atau PC.'};
 }
