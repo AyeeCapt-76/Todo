@@ -64,7 +64,7 @@ svg{flex:none}
 .nav-h button:hover{background:var(--surface-2);color:var(--ink)}
 .addlist{padding:4px 10px}
 .side-foot{border-top:1px solid var(--line);padding:12px 14px 14px;display:flex;flex-direction:column;gap:10px;font-size:12.5px;color:var(--ink-2)}
-.stat{display:flex;gap:8px;align-items:flex-start}
+.stat{display:flex;gap:8px;align-items:flex-start}.stat[hidden],.row-bk[hidden]{display:none}
 .stat b{display:block;color:var(--ink);font-weight:600}
 .pulse-dot{width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--good)}
 .pulse-dot.warn{background:var(--warn)} .pulse-dot.bad{background:var(--bad)}
@@ -634,6 +634,13 @@ input[type=text],input[type=date],input[type=time],select,textarea{border-radius
 .auth-guest{color:var(--ink-3);font-size:13px;text-decoration:underline;padding:6px}
 .acct{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 12px 14px;padding:12px 14px;border-radius:16px;background:var(--surface-2);border:1px solid var(--line)}
 .acct div{min-width:0}.acct b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.acct small{display:block;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Desktop lebar: dashboard dan daftar tugas satu kolom rata tengah */
+@media (min-width:900px){
+  .dash{max-width:900px;width:100%;margin-left:auto;margin-right:auto}
+  .dash>*{max-width:none}
+  .lvlw{background:none}
+  .stats{max-width:none}
+}
 </style>
 
 <div class="app" id="app" data-detail="closed">
@@ -1324,9 +1331,9 @@ function renderSide(){
       '<div class="stat"><span class="pulse-dot '+(S.audioOn?'':'warn')+'"></span><div><b>'+(S.audioOn?'Suara alarm aktif':'Suara alarm belum aktif')+'</b>Alarm berbunyi saat MARKETING terbuka di salah satu perangkat.</div></div>'+
       (S.update?'<div class="stat"><div><b>Pembaruan '+esc(S.update.ver)+' tersedia</b>Unduh APK baru lalu instal di atas aplikasi ini. Data tetap aman.</div></div><div class="row-bk"><button class="btn sm primary" data-act="appupdate">Unduh pembaruan</button></div>':'')+
       (S.mode==='local'?'<div class="row-bk"><button class="btn sm primary" data-act="sync"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+(S.syncing?'Menyinkronkan…':'Sync')+'</button><button class="btn sm" data-act="syncset">Atur</button></div>':'')+
-      (S.mode==='cloud'?'<div class="stat"><div><b>Sync JSON</b>Data sudah otomatis tersinkron lewat akun yang kamu pakai untuk masuk (Google atau email). Tombol ini membuat file JSON yang sama dengan aplikasi APK.</div></div><div class="row-bk"><button class="btn sm primary" data-act="syncexp"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+'Sync</button><button class="btn sm" data-act="syncimp"'+(S.syncing?' disabled':'')+'>Muat JSON</button></div>':'')+
-      '<div class="stat"><div><b>Cadangan data</b>Ekspor menyimpan ke file. Impor menggabungkan, tidak menimpa data yang lebih baru.</div></div>'+
-      '<div class="row-bk"><button class="btn sm" data-act="export">Ekspor</button><button class="btn sm" data-act="import">Impor</button></div>'+
+      (S.mode==='cloud'?'<div class="stat" hidden><div><b>Sync JSON</b>Data sudah otomatis tersinkron lewat akun yang kamu pakai untuk masuk (Google atau email). Tombol ini membuat file JSON yang sama dengan aplikasi APK.</div></div><div class="row-bk" hidden><button class="btn sm primary" data-act="syncexp"'+(S.syncing?' disabled':'')+'>'+ic('cloud',15)+'Sync</button><button class="btn sm" data-act="syncimp"'+(S.syncing?' disabled':'')+'>Muat JSON</button></div>':'')+
+      '<div class="stat" hidden><div><b>Cadangan data</b>Ekspor menyimpan ke file. Impor menggabungkan, tidak menimpa data yang lebih baru.</div></div>'+
+      '<div class="row-bk" hidden><button class="btn sm" data-act="export">Ekspor</button><button class="btn sm" data-act="import">Impor</button></div>'+
       '<div class="row-sel"><select id="soundSel" aria-label="Nada alarm">'+sounds+'</select><button class="btn sm" data-act="test">'+ic('sound',15)+'Uji</button></div>'+
     '</div>';
   renderStatus();
